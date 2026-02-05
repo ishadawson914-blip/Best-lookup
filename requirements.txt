@@ -1,6 +1,7 @@
 streamlit
 pandas
-easyocr
-opencv-python-headless
-pillow
 numpy
+easyocr
+thefuzz
+python-Levenshtein
+Pillow
