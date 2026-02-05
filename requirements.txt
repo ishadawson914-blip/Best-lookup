@@ -1,7 +1,9 @@
 streamlit
 pandas
-numpy
 easyocr
+opencv-python-headless
+pillow
+numpy
 thefuzz
 python-Levenshtein
-Pillow
+
