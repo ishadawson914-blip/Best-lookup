@@ -4,6 +4,7 @@ import urllib.parse
 import numpy as np
 import re
 from PIL import Image
+from thefuzz import process, fuzz
 
 # We use easyocr for the address reading
 try:
@@ -16,13 +17,13 @@ except ImportError:
 @st.cache_resource
 def load_ocr():
     if OCR_AVAILABLE:
-        # This downloads the models on the first run
         return easyocr.Reader(['en'])
     return None
 
 # Load the data
 @st.cache_data
 def load_data():
+    # Ensure SortCart.csv is in the same directory
     df = pd.read_csv('SortCart.csv')
     unique_streets = sorted(df['StreetName'].unique())
     return df, unique_streets
@@ -34,64 +35,68 @@ def make_map_link(row, specific_no=None):
     num = specific_no if specific_no else row['StreetNoMin']
     address = f"{num} {row['StreetName']}, {row['Suburb']}, NSW {row['Postcode']}, Australia"
     query = urllib.parse.quote(address)
-    return f"https://www.google.com/maps/search/?api=1&query={query}"
+    return f"http://maps.google.com/?q={query}"
 
-st.set_page_config(page_title="Leightonfield", layout="wide", initial_sidebar_state="expanded")
-
-# Custom CSS for a cleaner mobile look
-st.markdown('''
-    <style>
-    .stSelectbox div[data-baseweb="select"] { background-color: white; }
-    </style>
-    ''', unsafe_allow_html=True)
-
-st.title("📍 Sorting App with Photo Scan")
+st.set_page_config(page_title="Leightonfield Sorting", layout="wide", initial_sidebar_state="expanded")
 
 # --- OCR Camera Section ---
 scanned_street = None
 scanned_no = None
+confidence_score = 0
 
 if OCR_AVAILABLE:
-    with st.expander("📸 Scan Address from Photo (Label)"):
-        img_file = st.camera_input("Take a photo of the address")
+    with st.expander("📸 Scan Address from Photo (Label)", expanded=True):
+        img_file = st.camera_input("Take a photo of the address label")
+        
         if img_file:
             img = Image.open(img_file)
             img_np = np.array(img)
+            
             with st.spinner("Analyzing image..."):
                 results_ocr = reader.readtext(img_np)
-                # Sort OCR results by their vertical position then horizontal
-                results_ocr.sort(key=lambda x: (x[0][0][1], x[0][0][0]))
-                full_text = " ".join([res[1].upper() for res in results_ocr])
-                st.info(f"Detected Text: {full_text}")
-
-                # Improved extraction logic
-                # 1. Find the street name first
-                found_street = None
-                for street in street_list:
-                    if street in full_text:
-                        # Find the longest matching street name to be more specific
-                        if found_street is None or len(street) > len(found_street):
-                            found_street = street
                 
-                if found_street:
-                    scanned_street = found_street
-                    # 2. Look for a number near the street name
-                    # Look for digits in the 25 characters preceding the street name
-                    pattern = re.compile(r'(\d+)')
-                    idx = full_text.find(found_street)
+                # 1. Extract and clean text strings
+                detected_strings = [res[1].upper().strip() for res in results_ocr]
+                full_text_blob = " ".join(detected_strings)
+                
+                # 2. Fuzzy Street Match
+                # Uses thefuzz to find the closest match from your master street_list
+                best_match, score = process.extractOne(full_text_blob, street_list, scorer=fuzz.partial_ratio)
+                
+                if score > 70:  # If we have a decent match
+                    scanned_street = best_match
+                    confidence_score = score
                     
-                    # Search in a window before the street name
-                    prefix = full_text[max(0, idx-25):idx]
-                    numbers = pattern.findall(prefix)
-                    if numbers:
-                        # Take the last number before the street name (most likely house number)
-                        scanned_no = numbers[-1]
+                    # 3. Smart Number Extraction based on proximity
+                    # Find which OCR box likely contained the street name
+                    street_box_idx = -1
+                    for i, text in enumerate(detected_strings):
+                        if fuzz.partial_ratio(scanned_street, text) > 80:
+                            street_box_idx = i
+                            break
+                    
+                    # Look for numbers in the box before or inside the street name box
+                    # This avoids picking up postcodes or phone numbers elsewhere on the label
+                    context_text = ""
+                    if street_box_idx != -1:
+                        start = max(0, street_box_idx - 1)
+                        end = street_box_idx + 1
+                        context_text = " ".join(detected_strings[start:end])
+                    
+                    # Find sequences of digits
+                    found_numbers = re.findall(r'\b(\d+)\b', context_text)
+                    if found_numbers:
+                        # Usually the house number is the last digit sequence before/at the street name
+                        scanned_no = found_numbers[-1]
+
+                    # 4. Display Confidence Feedback
+                    if score > 90:
+                        st.success(f"✅ Found: **{scanned_no if scanned_no else ''} {scanned_street}** (Confidence: {score}%)")
                     else:
-                        # Fallback: check shortly after the street name
-                        suffix = full_text[idx + len(found_street): idx + len(found_street) + 15]
-                        numbers_suffix = pattern.findall(suffix)
-                        if numbers_suffix:
-                            scanned_no = numbers_suffix[0]
+                        st.warning(f"⚠️ Likely: **{scanned_no if scanned_no else ''} {scanned_street}** ({score}% match). Please check below.")
+                else:
+                    st.error("Could not clearly identify a street name. Try a clearer photo.")
+
 else:
     st.warning("OCR libraries not detected. Please check requirements.txt")
 
@@ -105,6 +110,7 @@ searched_no = None
 if option == "Street Address":
     col1, col2 = st.columns([3, 1])
     with col1:
+        # We pre-fill the selectbox if the scan was successful
         st_name = st.selectbox(
             "Street Name",
             options=street_list,
@@ -112,13 +118,15 @@ if option == "Street Address":
             placeholder="Select or scan a street"
         )
     with col2:
+        # Pre-fill the number from the scan
         default_no = scanned_no if scanned_no else ""
-        st_no_str = st.text_input("Number (optional)", value=default_no)
+        st_no_str = st.text_input("Number", value=default_no)
         if st_no_str.isdigit():
             searched_no = int(st_no_str)
    
     if st_name:
         if searched_no is not None:
+            # Check for Even/Odd parity and range
             parity = 2 if searched_no % 2 == 0 else 1
             mask = (
                 (df['StreetName'] == st_name) &
@@ -128,10 +136,11 @@ if option == "Street Address":
             )
             results = df[mask].copy()
         else:
+            # If no number entered, show all segments for that street
             results = df[df['StreetName'] == st_name].copy()
 
 elif option == "Beat Number":
-    beat_val = st.sidebar.number_input("Enter Beat Number", min_value=1, value=1011)
+    beat_val = st.sidebar.number_input("Enter Beat Number", min_value=1, step=1)
     results = df[df['BeatNo'] == beat_val].copy()
 
 elif option == "Suburb":
@@ -140,37 +149,39 @@ elif option == "Suburb":
     results = df[df['Suburb'] == sub_val].copy()
 
 # --- Display Results ---
+st.divider()
+
 if not results.empty:
-    # Hierarchical Sorting
     results = results.sort_values(by=['Suburb', 'StreetName', 'StreetNoMin'])
     results['Map Link'] = results.apply(lambda row: make_map_link(row, searched_no), axis=1)
    
-    st.success(f"Found {len(results)} record(s)")
+    st.success(f"Found {len(results)} matching sorting record(s)")
     
-    # Column selection: Suburb is first
     display_cols = ['Suburb', 'StreetName', 'StreetNoMin', 'StreetNoMax', 'BeatNo', 'TeamNo', 'Postcode', 'Map Link']
-    display_results = results[display_cols]
-   
+    
     st.dataframe(
-        display_results,
+        results[display_cols],
         column_config={
             "Map Link": st.column_config.LinkColumn("Maps", display_text="📍 View"),
-            "BeatNo": "Beat", "TeamNo": "Team",
-            "StreetNoMin": "Min No", "StreetNoMax": "Max No"
+            "BeatNo": "Beat", 
+            "TeamNo": "Team",
+            "StreetNoMin": "Min", 
+            "StreetNoMax": "Max"
         },
         use_container_width=True,
         hide_index=True
     )
    
-    csv = display_results.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Export to CSV", data=csv, file_name='search_results.csv', mime='text/csv')
+    csv = results[display_cols].to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Export Results", data=csv, file_name='search_results.csv', mime='text/csv')
 
 elif (option == "Street Address" and st_name):
-    st.warning("No entry found. Please check the street number.")
+    st.error(f"No entry found for {st_no_str} {st_name}. Please verify the number is within range.")
     
  
 
  
+
 
 
 
