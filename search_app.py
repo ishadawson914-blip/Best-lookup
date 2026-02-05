@@ -38,11 +38,15 @@ def make_map_link(row, specific_no=None):
 
 st.set_page_config(page_title="Leightonfield Sorting", layout="wide", initial_sidebar_state="expanded")
 
-# --- OCR Camera Section ---
+# --- Sidebar Search Settings ---
+st.sidebar.header("Search Settings")
+option = st.sidebar.selectbox("Search by:", ["Street Address", "Beat Number", "Suburb"])
+
+# --- OCR Camera Section (Only shows if Street Address is selected) ---
 scanned_street = None
 scanned_no = None
 
-if OCR_AVAILABLE:
+if option == "Street Address" and OCR_AVAILABLE:
     with st.expander("📸 Scan Address from Photo (Label)", expanded=True):
         img_file = st.camera_input("Take a photo of the address label")
         
@@ -55,40 +59,44 @@ if OCR_AVAILABLE:
                 detected_strings = [res[1].upper().strip() for res in results_ocr]
                 full_text_blob = " ".join(detected_strings)
                 
-                # Fuzzy Street Match
+                # --- LESS STRICT FUZZY MATCHING ---
+                # Lowered threshold to 60 to allow more "guessing"
                 best_match, score = process.extractOne(full_text_blob, street_list, scorer=fuzz.partial_ratio)
                 
-                if score > 70:
+                if score > 60:
                     scanned_street = best_match
                     
-                    # Number extraction logic
+                    # Find coordinates of the street name to look for the number nearby
                     street_box_idx = -1
                     for i, text in enumerate(detected_strings):
-                        if fuzz.partial_ratio(scanned_street, text) > 80:
+                        if fuzz.partial_ratio(scanned_street, text) > 70:
                             street_box_idx = i
                             break
                     
                     context_text = ""
                     if street_box_idx != -1:
-                        start = max(0, street_box_idx - 1)
-                        end = street_box_idx + 1
+                        # Expand search area slightly for "less strict" mode
+                        start = max(0, street_box_idx - 2)
+                        end = street_box_idx + 2
                         context_text = " ".join(detected_strings[start:end])
                     
                     found_numbers = re.findall(r'\b(\d+)\b', context_text)
                     if found_numbers:
+                        # Typically the last number mentioned before the street name
                         scanned_no = found_numbers[-1]
 
-                    if score > 90:
-                        st.success(f"✅ Found: **{scanned_no if scanned_no else ''} {scanned_street}** ({score}%)")
+                    # Visual Feedback for the User
+                    if score > 85:
+                        st.success(f"✅ Strong Match: **{scanned_no if scanned_no else ''} {scanned_street}** ({score}%)")
                     else:
-                        st.warning(f"⚠️ Likely: **{scanned_no if scanned_no else ''} {scanned_street}** ({score}%)")
-else:
+                        st.info(f"🤔 Best Guess: **{scanned_no if scanned_no else ''} {scanned_street}** ({score}%). Please check.")
+                else:
+                    st.error("Text was too blurry to identify a street. Please try again.")
+
+elif option == "Street Address" and not OCR_AVAILABLE:
     st.warning("OCR libraries not detected.")
 
-# --- Search Settings ---
-st.sidebar.header("Search Settings")
-option = st.sidebar.selectbox("Search by:", ["Street Address", "Beat Number", "Suburb"])
-
+# --- Search Logic ---
 results = pd.DataFrame()
 searched_no = None
 
@@ -138,7 +146,7 @@ if not results.empty:
    
     st.success(f"Found {len(results)} record(s)")
     
-    # NEW COLUMN ORDER DEFINED HERE
+    # Column Order: Maps, Beat, Postcode, Suburb, Street Name, From, To, Team
     display_cols = ['Map Link', 'BeatNo', 'Postcode', 'Suburb', 'StreetName', 'StreetNoMin', 'StreetNoMax', 'TeamNo']
     
     st.dataframe(
@@ -161,11 +169,12 @@ if not results.empty:
     st.download_button("📥 Export Results", data=csv, file_name='search_results.csv', mime='text/csv')
 
 elif (option == "Street Address" and st_name):
-    st.error("No entry found. Please verify the details.")
+    st.error("No record found for this number range. Please verify.")
     
  
 
  
+
 
 
 
