@@ -42,7 +42,7 @@ st.set_page_config(page_title="Leightonfield Sorting", layout="wide", initial_si
 st.sidebar.header("Search Settings")
 option = st.sidebar.selectbox("Search by:", ["Street Address", "Beat Number", "Suburb"])
 
-# --- OCR Camera Section (Only shows if Street Address is selected) ---
+# --- OCR Camera Section ---
 scanned_street = None
 scanned_no = None
 
@@ -59,42 +59,47 @@ if option == "Street Address" and OCR_AVAILABLE:
                 detected_strings = [res[1].upper().strip() for res in results_ocr]
                 full_text_blob = " ".join(detected_strings)
                 
-                # --- LESS STRICT FUZZY MATCHING ---
-                # Lowered threshold to 60 to allow more "guessing"
+                # 1. Fuzzy Street Match (Less strict threshold of 60)
                 best_match, score = process.extractOne(full_text_blob, street_list, scorer=fuzz.partial_ratio)
                 
                 if score > 60:
                     scanned_street = best_match
                     
-                    # Find coordinates of the street name to look for the number nearby
+                    # 2. Find the index of the box containing the street name
                     street_box_idx = -1
                     for i, text in enumerate(detected_strings):
                         if fuzz.partial_ratio(scanned_street, text) > 70:
                             street_box_idx = i
                             break
                     
-                    context_text = ""
+                    # 3. Targeted Number Search (ONLY BEFORE the street name)
                     if street_box_idx != -1:
-                        # Expand search area slightly for "less strict" mode
-                        start = max(0, street_box_idx - 2)
-                        end = street_box_idx + 2
-                        context_text = " ".join(detected_strings[start:end])
-                    
-                    found_numbers = re.findall(r'\b(\d+)\b', context_text)
-                    if found_numbers:
-                        # Typically the last number mentioned before the street name
-                        scanned_no = found_numbers[-1]
+                        # Look at the box containing the street and the 2 boxes before it
+                        start_search = max(0, street_box_idx - 2)
+                        # We only look up to the street box itself
+                        context_text = " ".join(detected_strings[start_search : street_box_idx + 1])
+                        
+                        # Find all numbers
+                        found_numbers = re.findall(r'\b(\d+)\b', context_text)
+                        
+                        if found_numbers:
+                            # Filter out common NSW postcodes (usually 2000-2999) 
+                            # if they are the only number, we'll take them, 
+                            # but we prefer the FIRST number in the sequence (House Number)
+                            potential_numbers = [n for n in found_numbers if not (len(n) == 4 and n.startswith('2'))]
+                            
+                            if potential_numbers:
+                                scanned_no = potential_numbers[0] # Take the FIRST one found before street
+                            else:
+                                scanned_no = found_numbers[0]
 
-                    # Visual Feedback for the User
+                    # Feedback
                     if score > 85:
-                        st.success(f"✅ Strong Match: **{scanned_no if scanned_no else ''} {scanned_street}** ({score}%)")
+                        st.success(f"✅ Found: **{scanned_no if scanned_no else ''} {scanned_street}** ({score}%)")
                     else:
-                        st.info(f"🤔 Best Guess: **{scanned_no if scanned_no else ''} {scanned_street}** ({score}%). Please check.")
+                        st.info(f"🤔 Best Guess: **{scanned_no if scanned_no else ''} {scanned_street}** ({score}%)")
                 else:
-                    st.error("Text was too blurry to identify a street. Please try again.")
-
-elif option == "Street Address" and not OCR_AVAILABLE:
-    st.warning("OCR libraries not detected.")
+                    st.error("Could not identify street. Try a clearer photo.")
 
 # --- Search Logic ---
 results = pd.DataFrame()
@@ -107,11 +112,10 @@ if option == "Street Address":
             "Street Name",
             options=street_list,
             index=street_list.index(scanned_street) if scanned_street in street_list else None,
-            placeholder="Select or scan a street"
+            placeholder="Select or scan"
         )
     with col2:
-        default_no = scanned_no if scanned_no else ""
-        st_no_str = st.text_input("Number", value=default_no)
+        st_no_str = st.text_input("Number", value=scanned_no if scanned_no else "")
         if st_no_str.isdigit():
             searched_no = int(st_no_str)
    
@@ -134,46 +138,29 @@ elif option == "Beat Number":
 
 elif option == "Suburb":
     suburb_list = sorted(df['Suburb'].unique())
-    sub_val = st.selectbox("Select Suburb", suburb_list, index=None, placeholder="Choose a suburb")
+    sub_val = st.selectbox("Select Suburb", suburb_list, index=None)
     results = df[df['Suburb'] == sub_val].copy()
 
-# --- Display Results ---
+# --- Results Table ---
 st.divider()
-
 if not results.empty:
     results = results.sort_values(by=['Suburb', 'StreetName', 'StreetNoMin'])
     results['Map Link'] = results.apply(lambda row: make_map_link(row, searched_no), axis=1)
-   
-    st.success(f"Found {len(results)} record(s)")
     
-    # Column Order: Maps, Beat, Postcode, Suburb, Street Name, From, To, Team
     display_cols = ['Map Link', 'BeatNo', 'Postcode', 'Suburb', 'StreetName', 'StreetNoMin', 'StreetNoMax', 'TeamNo']
-    
     st.dataframe(
         results[display_cols],
         column_config={
             "Map Link": st.column_config.LinkColumn("Maps", display_text="📍 View"),
-            "BeatNo": "Beat", 
-            "Postcode": "Postcode",
-            "Suburb": "Suburb",
-            "StreetName": "Street Name",
-            "StreetNoMin": "From (Min No)", 
-            "StreetNoMax": "To (Max No)",
-            "TeamNo": "Team"
+            "StreetNoMin": "From (Min No)", "StreetNoMax": "To (Max No)"
         },
-        use_container_width=True,
-        hide_index=True
+        use_container_width=True, hide_index=True
     )
-   
-    csv = results[display_cols].to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Export Results", data=csv, file_name='search_results.csv', mime='text/csv')
-
-elif (option == "Street Address" and st_name):
-    st.error("No record found for this number range. Please verify.")
     
  
 
  
+
 
 
 
