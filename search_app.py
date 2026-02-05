@@ -59,39 +59,41 @@ if option == "Street Address" and OCR_AVAILABLE:
                 detected_strings = [res[1].upper().strip() for res in results_ocr]
                 full_text_blob = " ".join(detected_strings)
                 
-                # 1. Fuzzy Street Match (Less strict threshold of 60)
+                # 1. Fuzzy Street Match
                 best_match, score = process.extractOne(full_text_blob, street_list, scorer=fuzz.partial_ratio)
                 
                 if score > 60:
                     scanned_street = best_match
                     
-                    # 2. Find the index of the box containing the street name
+                    # 2. Find the box containing the street name
                     street_box_idx = -1
                     for i, text in enumerate(detected_strings):
-                        if fuzz.partial_ratio(scanned_street, text) > 70:
+                        if fuzz.partial_ratio(scanned_street, text) > 75:
                             street_box_idx = i
                             break
                     
-                    # 3. Targeted Number Search (ONLY BEFORE the street name)
+                    # 3. UNIT-AWARE NUMBER EXTRACTION
                     if street_box_idx != -1:
-                        # Look at the box containing the street and the 2 boxes before it
+                        # We look at the 2 boxes before the street name
                         start_search = max(0, street_box_idx - 2)
-                        # We only look up to the street box itself
+                        # We include the street box itself in case it's "28 COWPER"
                         context_text = " ".join(detected_strings[start_search : street_box_idx + 1])
                         
-                        # Find all numbers
-                        found_numbers = re.findall(r'\b(\d+)\b', context_text)
+                        # Replace '/' with spaces to separate Unit/Street (e.g., '1603/28' -> '1603 28')
+                        clean_context = context_text.replace('/', ' ')
+                        # Find all sequences of digits
+                        found_numbers = re.findall(r'\b(\d+)\b', clean_context)
                         
                         if found_numbers:
-                            # Filter out common NSW postcodes (usually 2000-2999) 
-                            # if they are the only number, we'll take them, 
-                            # but we prefer the FIRST number in the sequence (House Number)
+                            # Filter out NSW postcodes (2000-2999)
                             potential_numbers = [n for n in found_numbers if not (len(n) == 4 and n.startswith('2'))]
                             
                             if potential_numbers:
-                                scanned_no = potential_numbers[0] # Take the FIRST one found before street
+                                # IMPORTANT: The street number is the one CLOSEST to the street name.
+                                # In "1603 28 COWPER", 28 is the last number before the name.
+                                scanned_no = potential_numbers[-1] 
                             else:
-                                scanned_no = found_numbers[0]
+                                scanned_no = found_numbers[-1]
 
                     # Feedback
                     if score > 85:
@@ -160,6 +162,7 @@ if not results.empty:
  
 
  
+
 
 
 
