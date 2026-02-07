@@ -5,4 +5,5 @@ thefuzz
 easyocr
 opencv-python-headless
 streamlit-cropper
-PIL
+Pillow
+
