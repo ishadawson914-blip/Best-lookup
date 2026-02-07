@@ -1,9 +1,11 @@
 streamlit
 pandas
-numpy
-thefuzz
 easyocr
 opencv-python-headless
+pilllow
+numpy
+thefuzz
+python-Levenshtein
 streamlit-cropper
-Pillow
+
 
