@@ -164,10 +164,8 @@ if not results_df.empty:
     
     results_df['Map Link'] = results_df.apply(lambda row: make_map_link(row, searched_no), axis=1)
     st.dataframe(results_df[['Map Link', 'BeatNo', 'Postcode', 'Suburb', 'StreetName', 'StreetNoMin', 'StreetNoMax', 'TeamNo']], column_config={"Map Link": st.column_config.LinkColumn("Maps", display_text="📍 View")}, use_container_width=True, hide_index=True)
-    
  
 
- 
 
 
 
