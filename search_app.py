@@ -160,11 +160,23 @@ elif option == "Suburb":
 st.divider()
 if not results_df.empty:
     if searched_no:
-        st.markdown(f"""<div style="background-color:#007BFF;padding:20px;border-radius:10px;text-align:center;"><h1 style="color:white;margin:0;">BEAT: {results_df.iloc[0]['BeatNo']}</h1></div>""", unsafe_content_allowed=True)
-    
+      if not results_df.empty:
+    if searched_no:
+        # Get the first result's Beat Number
+        primary_beat = results_df.iloc[0]['BeatNo']
+        # Corrected HTML style and f-string formatting
+        st.markdown(
+            f"""
+            <div style="background-color:#007BFF;padding:20px;border-radius:10px;text-align:center;">
+                <h1 style="color:white;margin:0;">BEAT: {primary_beat}</h1>
+            </div>
+            """, 
+            unsafe_content_allowed=True
+        )
     results_df['Map Link'] = results_df.apply(lambda row: make_map_link(row, searched_no), axis=1)
     st.dataframe(results_df[['Map Link', 'BeatNo', 'Postcode', 'Suburb', 'StreetName', 'StreetNoMin', 'StreetNoMax', 'TeamNo']], column_config={"Map Link": st.column_config.LinkColumn("Maps", display_text="📍 View")}, use_container_width=True, hide_index=True)
  
+
 
 
 
