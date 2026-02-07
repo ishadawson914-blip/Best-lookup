@@ -1,11 +1,12 @@
 streamlit
 pandas
-easyocr
-opencv-python-headless
-pilllow
 numpy
 thefuzz
-python-Levenshtein
+easyocr
+opencv-python-headless
 streamlit-cropper
+Pillow
+python-Levenshtein
+
 
 
